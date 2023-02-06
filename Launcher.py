@@ -262,7 +262,7 @@ def execute(calls, sizes, options, args):
             if checkCuda: average = globals()[averageFunc](xres, yres, locals()[name], tpb)
             else: average = globals()[averageFunc](xres, yres, locals()[name])  # calcular promedio
             averageTime = time.time() - averageTime
-            try: error = "-" if original == name else LA.norm(locals()[name] - globals()[original])  # calcular error
+            try: error = "-" if original == name else LA.norm(locals()[name] - locals()[original])  # calcular error
             except Exception: error = "NaN"
 
             if cuda: tpbStr = "-" if "Py" in function else tpb
