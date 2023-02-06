@@ -6,193 +6,210 @@ import numpy as np
 from numpy.ctypeslib import ndpointer
 from numpy import linalg as LA
 import mandel
+import utils
 
 
-def generate_alias(string):
-    splitted = string.split('_')
-    alias = splitted[1]
-    if len(splitted) == 3:
-        alias += f" ({splitted[2]})"
-    return alias
+def read_options(argv):
+    options = {
+        'debug': "debug" in argv,
+        'binarizar': "bin" in argv,
+        'diffs': "diffs" in argv,
+        'times': "times" in argv,
+        'onlytimes': "onlytimes" in argv,
+        'mode': 'cuda' if 'tpb' in argv else 'omp',
+        'cuda': 'cuda' in argv,
+        'noheader': "noheader" in argv,
+    }
+
+    args = {
+        'xmin': float(argv[1]),
+        'xmax': float(argv[2]),
+        'ymin': float(argv[3]),
+        'maxiter': int(argv[4])
+    }
+
+    if options['cuda']:  # Detección de modo CUDA
+        try: tpb = int(argv[argv.index("tpb") + 1])
+        except Exception:
+            tpb = 32
+            print("Error al obtener el número de hilos por bloque, se utiliza valor por defecto (32)")
+        args['tpb'] = tpb
+
+    args['ymax'] = args['xmax'] - args['xmin'] + args['ymin']
+
+    return options, args
 
 
-debug = "debug" in sys.argv
-binarizar = "bin" in sys.argv
-diffs = "diffs" in sys.argv
-times = "times" in sys.argv
-onlytimes = "onlytimes" in sys.argv
-
-if "tpb" in sys.argv:  # Detección de modo CUDA
-    try: tpb = int(sys.argv[sys.argv.index("tpb") + 1])
-    except Exception:
-        tpb = 32
-        print("Error al obtener el número de hilos por bloque, se utiliza valor por defecto (32)")
-    mode = "GPU"
-    cuda = True
-    translated = 'cuda'
-else:
-    mode = "SECUENCIAL" if os.environ.get("OMP_NUM_THREADS") == '1' else "PARALELO"
-    cuda = False
-    translated = 'omp'
-
-os.system(f"make {translated} >/dev/null")  # Se ignoran los mensajes pero no los errores
-
-validFunctions = {
-    'omp': {
-        'mandel': {
-            'normal': 'mandel_normal',
-            'collapse': 'mandel_collapse',
-            'tasks': 'mandel_tasks',
-            'schedule_auto': 'mandel_schedule_auto',
-            'schedule_static': 'mandel_schedule_static',
-            'schedule_guided': 'mandel_schedule_guided',
-            'schedule_dynamic': 'mandel_schedule_dynamic'
+def read_calls(argv, mode):
+    validFunctions = {   # Diccionario de funciones válidas y sus alias en parámetros.
+        'omp': {
+            'mandel': {
+                'normal': 'mandel_normal',
+                'collapse': 'mandel_collapse',
+                'tasks': 'mandel_tasks',
+                'schedule_auto': 'mandel_schedule_auto',
+                'schedule_static': 'mandel_schedule_static',
+                'schedule_guided': 'mandel_schedule_guided',
+                'schedule_dynamic': 'mandel_schedule_dynamic'
+            },
+            'promedio': {
+                'normal': 'promedio_normal',
+                'int': 'promedio_int',
+                'schedule': 'promedio_schedule',
+                'atomic': 'promedio_atomic',
+                'critical': 'promedio_critical',
+                'vect': 'promedio_vect'
+            }
         },
-        'promedio': {
-            'normal': 'promedio_normal',
-            'int': 'promedio_int',
-            'schedule': 'promedio_schedule',
-            'atomic': 'promedio_atomic',
-            'critical': 'promedio_critical',
-            'vect': 'promedio_vect'
-        }
-    },
-    'cuda': {
-        'mandel': {
-            'normal': 'mandelGPU_normal',
-            'heter': 'mandelGPU_heter',
-            'unified': 'mandelGPU_unified',
-            'pinned': 'mandelGPU_pinned',
-            '1D': 'mandelGPU_1D'
-        },
-        'promedio': {
-            'api': 'promedioGPU_api',
-            'shared': 'promedioGPU_shared',
-            'param': 'promedioGPU_param',
-            'atomic': 'promedioGPU_atomic',
+        'cuda': {
+            'mandel': {
+                'normal': 'mandelGPU_normal',
+                'heter': 'mandelGPU_heter',
+                'unified': 'mandelGPU_unified',
+                'pinned': 'mandelGPU_pinned',
+                '1D': 'mandelGPU_1D'
+            },
+            'promedio': {
+                'api': 'promedioGPU_api',
+                'shared': 'promedioGPU_shared',
+                'param': 'promedioGPU_param',
+                'atomic': 'promedioGPU_atomic',
+            }
         }
     }
-}
 
-validCalls = {
-    'prof': {
-        'function': 'mandelProf',
-        'name': 'fractalProf',
-        'average': 'mediaProf',
-        'binary': 'binarizaProf'
-    },
-    'py': {
-        'function': 'mandelPy',
-        'name': 'fractalPy',
-        'average': 'mediaPy',
-        'binary': 'binarizaPy'
-    },
-    'own': {}
-}
+    validCalls = {
+        'prof': {
+            'function': 'mandelProf',
+            'name': 'fractalProf',
+            'average': 'mediaProf',
+            'binary': 'binarizaProf'
+        },
+        'py': {
+            'function': 'mandelPy',
+            'name': 'fractalPy',
+            'average': 'mediaPy',
+            'binary': 'binarizaPy'
+        },
+        'own': {}
+    }
 
-calls = []
-sizes = []
+    calls = []
+    sizes = []
 
-for key in list(validCalls.keys()):
-    if key in sys.argv:
-        if key == 'own':
-            averages = [next(iter(validFunctions[translated]['promedio'].values()))]
+    for key in list(validCalls.keys()):
+        if key in argv:
+            if key == 'own':
+                averages = [next(iter(validFunctions[mode]['promedio'].values()))]
 
-            if "averages" in sys.argv:
-                if "all" == sys.argv[sys.argv.index("averages") + 1]:
-                    averages = list(validFunctions[translated]['promedio'].values())
-                else:
-                    averages = []
-                    for i in range(sys.argv.index("averages") + 1, len(sys.argv)):
-                        if sys.argv[i] in validFunctions[translated]['promedio']:
-                            averages.append(validFunctions[translated]['promedio'][sys.argv[i]])
-                        else: break
+                if "averages" in sys.argv:
+                    if "all" == sys.argv[sys.argv.index("averages") + 1]:
+                        averages = list(validFunctions[mode]['promedio'].values())
+                    else:
+                        averages = []
+                        for i in range(sys.argv.index("averages") + 1, len(sys.argv)):
+                            if sys.argv[i] in validFunctions[mode]['promedio']:
+                                averages.append(validFunctions[mode]['promedio'][sys.argv[i]])
+                            else: break
 
-            if "methods" in sys.argv:
-                if "all" == sys.argv[sys.argv.index("methods") + 1]:
-                    for key, value in validFunctions[translated]['mandel'].items():
-                        for average in averages:
-                            calls.append({
-                                'function': value,
-                                'name': f'fractalAlumnx{key.capitalize()}',
-                                'average': average,
-                                'binary': 'binarizaAlumnx'
-                            })
-                else:
-                    for i in range(sys.argv.index("methods") + 1, len(sys.argv)):
-                        if sys.argv[i] in validFunctions[translated]['mandel']:
+                if "methods" in sys.argv:
+                    if "all" == sys.argv[sys.argv.index("methods") + 1]:
+                        for key, value in validFunctions[mode]['mandel'].items():
                             for average in averages:
                                 calls.append({
-                                    'function': validFunctions[translated]['mandel'][sys.argv[i]],
-                                    'name': f'fractalAlumnx{sys.argv[i].capitalize()}',
+                                    'function': value,
+                                    'name': f'fractalAlumnx{key.capitalize()}',
                                     'average': average,
                                     'binary': 'binarizaAlumnx'
                                 })
-                        else: break
-            else:
-                for average in averages:
-                    calls.append({
-                        'function': next(iter(validFunctions[translated]['mandel'].values())),
-                        'name': 'fractalAlumnx',
-                        'average': average,
-                        'binary': 'binarizaAlumnx'
-                    })
-        else: calls.append(validCalls.get(key))
-    elif f"-{key}" in sys.argv:
-        calls.remove(validCalls.get(key))
+                    else:
+                        for i in range(sys.argv.index("methods") + 1, len(sys.argv)):
+                            if sys.argv[i] in validFunctions[mode]['mandel']:
+                                for average in averages:
+                                    calls.append({
+                                        'function': validFunctions[mode]['mandel'][sys.argv[i]],
+                                        'name': f'fractalAlumnx{sys.argv[i].capitalize()}',
+                                        'average': average,
+                                        'binary': 'binarizaAlumnx'
+                                    })
+                            else: break
+                else:
+                    for average in averages:
+                        calls.append({
+                            'function': next(iter(validFunctions[mode]['mandel'].values())),
+                            'name': 'fractalAlumnx',
+                            'average': average,
+                            'binary': 'binarizaAlumnx'
+                        })
+            else: calls.append(validCalls.get(key))
+        elif f"-{key}" in sys.argv and key in validCalls:
+            calls.remove(validCalls.get(key))
 
-if "sizes" in sys.argv:
-    for i in range(sys.argv.index("sizes") + 1, len(sys.argv)):
-        try: sizes.append(int(sys.argv[i]))
-        except Exception: break
+    if "sizes" in sys.argv:
+        for i in range(sys.argv.index("sizes") + 1, len(sys.argv)):
+            try: sizes.append(int(sys.argv[i]))
+            except Exception: break
 
-if len(sizes) == 0: sizes.append(4)  # marcar error si no se detectan tamaños
+    if len(sizes) == 0: sizes.append(4)  # marcar error si no se detectan tamaños
+    return calls, sizes
 
-functions = {
-    'mandel': {
-        'name': 'mandel',
-        'restype': None,
-        'argtypes': [ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_int, ctypes.c_int, ctypes.c_int, ndpointer(ctypes.c_double, flags="C_CONTIGUOUS")]
-    },
-    'media': {
-        'name': 'promedio',
-        'restype': ctypes.c_double,
-        'argtypes': [ctypes.c_int, ctypes.c_int, ndpointer(ctypes.c_double, flags="C_CONTIGUOUS")]
-    },
-    'binariza': {
-        'name': 'binariza',
-        'restype': None,
-        'argtypes': [ctypes.c_int, ctypes.c_int, ndpointer(ctypes.c_double, flags="C_CONTIGUOUS"), ctypes.c_double]
+
+def load_libraries(calls, cuda):
+    functions = {
+        'mandel': {
+            'name': 'mandel',
+            'restype': None,
+            'argtypes': [ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_int, ctypes.c_int, ctypes.c_int, ndpointer(ctypes.c_double, flags="C_CONTIGUOUS")]
+        },
+        'media': {
+            'name': 'promedio',
+            'restype': ctypes.c_double,
+            'argtypes': [ctypes.c_int, ctypes.c_int, ndpointer(ctypes.c_double, flags="C_CONTIGUOUS")]
+        },
+        'binariza': {
+            'name': 'binariza',
+            'restype': None,
+            'argtypes': [ctypes.c_int, ctypes.c_int, ndpointer(ctypes.c_double, flags="C_CONTIGUOUS"), ctypes.c_double]
+        }
     }
-}
 
-owners = ['Prof', 'Alumnx']
-for owner in owners:
-    lib = ctypes.cdll.LoadLibrary(f"./{'cuda' if cuda else 'openmp'}/mandel{owner}{'GPU' if cuda else ''}.so")
-    for key, value in functions.items():
-        if owner == 'Alumnx' and (key == 'mandel' or key == 'media'): continue
-        locals()[f"{key}{owner}"] = getattr(lib, f"{value['name']}{'GPU' if cuda else ''}")
-        locals()[f"{key}{owner}"].restype = value['restype']
-        locals()[f"{key}{owner}"].argtypes = value['argtypes']
+    owners = ['Prof', 'Alumnx']
+    for owner in owners:
+        lib = ctypes.cdll.LoadLibrary(f"./{'cuda' if cuda else 'openmp'}/mandel{owner}{'GPU' if cuda else ''}.so")
+        for key, value in functions.items():
+            if owner == 'Alumnx' and (key == 'mandel' or key == 'media'): continue
+            globals()[f"{key}{owner}"] = getattr(lib, f"{value['name']}{'GPU' if cuda else ''}")
+            globals()[f"{key}{owner}"].restype = value['restype']
+            globals()[f"{key}{owner}"].argtypes = value['argtypes']
 
-    if owner == "Alumnx":
-        for call in calls:
-            if "Prof" in call['function'] or "Py" in call['function']: continue
-            locals()[f"{call['function']}"] = getattr(lib, call['function'])
-            locals()[f"{call['function']}"].restype = functions['mandel']['restype']
-            locals()[f"{call['function']}"].argtypes = functions['mandel']['argtypes']
-            locals()[f"{call['average']}"] = getattr(lib, call['average'])
-            locals()[f"{call['average']}"].restype = functions['media']['restype']
-            locals()[f"{call['average']}"].argtypes = functions['media']['argtypes']
+        if owner == "Alumnx":
+            for call in calls:
+                if "Prof" in call['function'] or "Py" in call['function']: continue
+                globals()[f"{call['function']}"] = getattr(lib, call['function'])
+                globals()[f"{call['function']}"].restype = functions['mandel']['restype']
+                globals()[f"{call['function']}"].argtypes = functions['mandel']['argtypes']
+                globals()[f"{call['average']}"] = getattr(lib, call['average'])
+                globals()[f"{call['average']}"].restype = functions['media']['restype']
+                globals()[f"{call['average']}"].argtypes = functions['media']['argtypes']
 
-if __name__ == "__main__":
-    xmin = float(sys.argv[1])
-    xmax = float(sys.argv[2])
-    ymin = float(sys.argv[3])
-    maxiter = int(sys.argv[4])
-    ymax = xmax - xmin + ymin
 
-    if "noheader" not in sys.argv:
+def execute(calls, sizes, options, args):
+    times = options['times']
+    onlytimes = options['onlytimes']
+    cuda = options['cuda']
+    binarizar = options['binarizar']
+    mode = options['mode']
+    debug = options['debug']
+    diffs = options['diffs']
+
+    if cuda: tpb = args['tpb']
+    xmin = args['xmin']
+    ymin = args['ymin']
+    xmax = args['xmax']
+    ymax = args['ymax']
+    maxiter = args['maxiter']
+
+    if not options['noheader']:
         base = "Function;Mode;Size;Time"
         if cuda: base += ";TPB"
         if not onlytimes:
@@ -204,13 +221,13 @@ if __name__ == "__main__":
                     base += ";Binary Time"
         print(base, flush=True)
 
-    if cuda:  # heat up cache
+    if options['cuda']:  # heat up cache
         for i in range(0, 3):
             size = next(iter(sizes))
             for call in calls:
                 locals()[call['name']] = np.zeros(size * size).astype(np.double)
-                locals()[call['function']](xmin, ymin, xmax, ymax, maxiter, size, size, locals()[call['name']], tpb)
-                locals()[call['average']](size, size, locals()[call['name']], tpb)
+                globals()[call['function']](xmin, ymin, xmax, ymax, maxiter, size, size, locals()[call['name']], tpb)
+                globals()[call['average']](size, size, locals()[call['name']], tpb)
 
     for size in sizes:
         yres = size
@@ -235,22 +252,22 @@ if __name__ == "__main__":
 
             # ejecutar función
             calcTime = time.time()
-            if checkCuda: locals()[function](xmin, ymin, xmax, ymax, maxiter, xres, yres, locals()[name], tpb)
-            else: locals()[function](xmin, ymin, xmax, ymax, maxiter, xres, yres, locals()[name])
+            if checkCuda: globals()[function](xmin, ymin, xmax, ymax, maxiter, xres, yres, locals()[name], tpb)
+            else: globals()[function](xmin, ymin, xmax, ymax, maxiter, xres, yres, locals()[name])
             calcTime = time.time() - calcTime
 
             # calcular promedio y error
             averageTime = time.time()
-            if checkCuda: average = locals()[averageFunc](xres, yres, locals()[name], tpb)
-            else: average = locals()[averageFunc](xres, yres, locals()[name])  # calcular promedio
+            if checkCuda: average = globals()[averageFunc](xres, yres, locals()[name], tpb)
+            else: average = globals()[averageFunc](xres, yres, locals()[name])  # calcular promedio
             averageTime = time.time() - averageTime
-            try: error = "-" if original == name else LA.norm(locals()[name] - locals()[original])  # calcular error
+            try: error = "-" if original == name else LA.norm(locals()[name] - globals()[original])  # calcular error
             except Exception: error = "NaN"
 
             if cuda: tpbStr = "-" if "Py" in function else tpb
 
             # imprimir resultados
-            results = f"{generate_alias(function)};{mode};{size};{calcTime:1.5E}"
+            results = f"{utils.alias(function)};{mode};{size};{calcTime:1.5E}"
             if cuda: results += f";{tpbStr}"
             if not onlytimes:
                 results += f";{error};{averageFunc};{average}"
@@ -260,23 +277,31 @@ if __name__ == "__main__":
             # guardar imágenes
             if debug:
                 mandel.grabar(locals()[name], xres, yres, f"{name}_{size}.bmp")  # guardar archivo
-                if diffs and i > 0: mandel.grabar(mandel.diffImage(locals()[name], locals()[original]), xres, yres, f"diff_{name}_{size}.bmp")
+                if diffs and i > 0: mandel.grabar(mandel.diffImage(locals()[name], globals()[original]), xres, yres, f"diff_{name}_{size}.bmp")
 
             # binarizar
             if binarizar and not onlytimes:
                 binName = f"bin_{name}"
                 binOriginal = f"bin_{original}"
-                locals()[binName] = np.copy(locals()[name])  # copiar imagen para evitar sobreescribirla
+                globals()[binName] = np.copy(locals()[name])  # copiar imagen para evitar sobreescribirla
 
                 # calcular binarización
                 binarizaTime = time.time()
-                if checkCuda: locals()[binaryFunc](xres, yres, locals()[binName], average, tpb)
-                else: locals()[binaryFunc](yres, xres, locals()[binName], average)
+                if checkCuda: globals()[binaryFunc](xres, yres, globals()[binName], average, tpb)
+                else: globals()[binaryFunc](yres, xres, globals()[binName], average)
                 binarizaTime = time.time() - binarizaTime
 
                 # calcular e imprimir error
-                error = "-" if binName == binOriginal else LA.norm(locals()[binName] - locals()[binOriginal])
+                error = "-" if binName == binOriginal else LA.norm(globals()[binName] - globals()[binOriginal])
                 print(f";{error};{f'{binarizaTime:1.5E}' if times else ''}", flush=True)
 
                 # guardar binarizado
-                if debug: mandel.grabar(locals()[binName], xres, yres, f"{binName}_{size}.bmp")
+                if debug: mandel.grabar(globals()[binName], xres, yres, f"{binName}_{size}.bmp")
+
+
+if __name__ == '__main__':
+    options, args = read_options(sys.argv)
+    os.system(f"make {options['mode']} >/dev/null")  # Se ignoran los mensajes pero no los errores
+    calls, sizes = read_calls(sys.argv, options['mode'])
+    load_libraries(calls, options['cuda'])
+    execute(calls, sizes, options, args)
