@@ -7,6 +7,7 @@ from numpy.ctypeslib import ndpointer
 from numpy import linalg as LA
 import mandel
 import utils
+from mandel import mandelPy, mediaPy, binarizaPy
 
 
 def read_options(argv):
@@ -246,7 +247,7 @@ def execute(calls, sizes, options, args):
             # demasiado largo y no son útiles para la práctica.
             # Para poder enviar todos los tamaños en una sola ejecución, se comprueba
             # el tamaño aquí.
-            if "Py" in function or "Py" in name and size > 2048: continue
+            if "Py" in function and size > 2048: continue
 
             locals()[name] = np.zeros(yres * xres).astype(np.double)  # reservar memoria
 
