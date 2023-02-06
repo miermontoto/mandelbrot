@@ -7,6 +7,15 @@ from numpy.ctypeslib import ndpointer
 from numpy import linalg as LA
 import mandel
 
+
+def generate_alias(string):
+    splitted = string.split('_')
+    alias = splitted[1]
+    if len(splitted) == 3:
+        alias += f" ({splitted[2]})"
+    return alias
+
+
 debug = "debug" in sys.argv
 binarizar = "bin" in sys.argv
 diffs = "diffs" in sys.argv
@@ -241,7 +250,7 @@ if __name__ == "__main__":
             if cuda: tpbStr = "-" if "Py" in function else tpb
 
             # imprimir resultados
-            results = f"{function};{mode};{size};{calcTime:1.5E}"
+            results = f"{generate_alias(function)};{mode};{size};{calcTime:1.5E}"
             if cuda: results += f";{tpbStr}"
             if not onlytimes:
                 results += f";{error};{averageFunc};{average}"
@@ -271,9 +280,3 @@ if __name__ == "__main__":
 
                 # guardar binarizado
                 if debug: mandel.grabar(locals()[binName], xres, yres, f"{binName}_{size}.bmp")
-
-
-def alias(string):
-    splitted = string.split('_')
-    if splitted.length == 3:
-        return f"{splitted[1].capitalize()} ({splitted[2]})"

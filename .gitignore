@@ -1,3 +1,4 @@
 *.bmp
 mandelAlumnx*.so
 *.done
+__pycache__
