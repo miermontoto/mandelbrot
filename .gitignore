@@ -2,3 +2,4 @@
 mandelAlumnx*.so
 *.done
 __pycache__
+.vscode

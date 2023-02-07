@@ -20,9 +20,10 @@ def read_options(argv):
         'mode': 'cuda' if 'tpb' in argv else 'omp',
         'cuda': 'cuda' in argv,
         'noheader': "noheader" in argv,
+        'csv': "csv" in argv,
     }
 
-    args = {
+    params = {
         'xmin': float(argv[1]),
         'xmax': float(argv[2]),
         'ymin': float(argv[3]),
@@ -34,11 +35,11 @@ def read_options(argv):
         except Exception:
             tpb = 32
             print("Error al obtener el número de hilos por bloque, se utiliza valor por defecto (32)")
-        args['tpb'] = tpb
+        params['tpb'] = tpb
 
-    args['ymax'] = args['xmax'] - args['xmin'] + args['ymin']
+    params['ymax'] = params['xmax'] - params['xmin'] + params['ymin']
 
-    return options, args
+    return options, params
 
 
 def read_calls(argv, mode):
@@ -194,7 +195,7 @@ def load_libraries(calls, cuda):
                 globals()[f"{call['average']}"].argtypes = functions['media']['argtypes']
 
 
-def execute(calls, sizes, options, args):
+def execute(calls, sizes, options, params):
     times = options['times']
     onlytimes = options['onlytimes']
     cuda = options['cuda']
@@ -203,24 +204,14 @@ def execute(calls, sizes, options, args):
     debug = options['debug']
     diffs = options['diffs']
 
-    if cuda: tpb = args['tpb']
-    xmin = args['xmin']
-    ymin = args['ymin']
-    xmax = args['xmax']
-    ymax = args['ymax']
-    maxiter = args['maxiter']
+    if cuda: tpb = params['tpb']
+    xmin = params['xmin']
+    ymin = params['ymin']
+    xmax = params['xmax']
+    ymax = params['ymax']
+    maxiter = params['maxiter']
 
-    if not options['noheader']:
-        base = "Function;Mode;Size;Time"
-        if cuda: base += ";TPB"
-        if not onlytimes:
-            base += ";Error;Average Function;Average"
-            if times: base += ";Average Time"
-            if binarizar:
-                base += ";Binary (err)"
-                if times:
-                    base += ";Binary Time"
-        print(base, flush=True)
+    objectives = utils.print_header(calls, sizes, options, params)
 
     if options['cuda']:  # heat up cache
         for i in range(0, 3):
@@ -251,29 +242,31 @@ def execute(calls, sizes, options, args):
 
             locals()[name] = np.zeros(yres * xres).astype(np.double)  # reservar memoria
 
+            results = {
+                'Function': function,
+                'Size': size
+            }
+
             # ejecutar función
             calcTime = time.time()
             if checkCuda: globals()[function](xmin, ymin, xmax, ymax, maxiter, xres, yres, locals()[name], tpb)
             else: globals()[function](xmin, ymin, xmax, ymax, maxiter, xres, yres, locals()[name])
             calcTime = time.time() - calcTime
+            results['Time'] = calcTime
 
             # calcular promedio y error
-            averageTime = time.time()
-            if checkCuda: average = globals()[averageFunc](xres, yres, locals()[name], tpb)
-            else: average = globals()[averageFunc](xres, yres, locals()[name])  # calcular promedio
-            averageTime = time.time() - averageTime
             try: error = "-" if original == name else LA.norm(locals()[name] - locals()[original])  # calcular error
             except Exception: error = "NaN"
+            results['Error'] = error
 
-            if cuda: tpbStr = "-" if "Py" in function else tpb
-
-            # imprimir resultados
-            results = f"{utils.alias(function)};{mode};{size};{calcTime:1.5E}"
-            if cuda: results += f";{tpbStr}"
             if not onlytimes:
-                results += f";{error};{averageFunc};{average}"
-                if times: results += f";{averageTime:1.5E}"
-            print(results, end="" if binarizar else "\n", flush=True)
+                results['Average Function'] = averageFunc
+                averageTime = time.time()
+                if checkCuda: average = globals()[averageFunc](xres, yres, locals()[name], tpb)
+                else: average = globals()[averageFunc](xres, yres, locals()[name])  # calcular promedio
+                averageTime = time.time() - averageTime
+                results['Average'] = average
+                if times: results['Average Time'] = averageTime
 
             # guardar imágenes
             if debug:
@@ -294,15 +287,18 @@ def execute(calls, sizes, options, args):
 
                 # calcular e imprimir error
                 error = "-" if binName == binOriginal else LA.norm(globals()[binName] - globals()[binOriginal])
-                print(f";{error};{f'{binarizaTime:1.5E}' if times else ''}", flush=True)
+                results['Binary Error'] = error
+                if times: results['Binary Time'] = binarizaTime
 
                 # guardar binarizado
                 if debug: mandel.grabar(globals()[binName], xres, yres, f"{binName}_{size}.bmp")
 
+            utils.print_execution(objectives, results, options['csv'])
+
 
 if __name__ == '__main__':
-    options, args = read_options(sys.argv)
+    options, params = read_options(sys.argv)
     os.system(f"make {options['mode']} >/dev/null")  # Se ignoran los mensajes pero no los errores
     calls, sizes = read_calls(sys.argv, options['mode'])
     load_libraries(calls, options['cuda'])
-    execute(calls, sizes, options, args)
+    execute(calls, sizes, options, params)
