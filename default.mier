@@ -3,4 +3,4 @@
 . ./values.sh
 
 unset OMP_NUM_THREADS
-python Launcher.py $xmin $xmax $ymin $maxiter prof py sizes 256 times #| column -t -s ';'
+python Launcher.py $xmin $xmax $ymin $maxiter prof own methods all sizes 256 512 1024 onlytimes                                                                                                                                                                                                                                                                                                                                                                                                              #| column -t -s ';'

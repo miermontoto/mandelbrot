@@ -6,7 +6,7 @@ import numpy as np
 from numpy.ctypeslib import ndpointer
 from numpy import linalg as LA
 import mandel
-import utils
+import output
 from mandel import mandelPy, mediaPy, binarizaPy
 
 
@@ -18,7 +18,7 @@ def read_options(argv):
         'times': "times" in argv,
         'onlytimes': "onlytimes" in argv,
         'mode': 'cuda' if 'tpb' in argv else 'omp',
-        'cuda': 'cuda' in argv,
+        'cuda': 'tpb' in argv,
         'noheader': "noheader" in argv,
         'csv': "csv" in argv,
     }
@@ -203,6 +203,7 @@ def execute(calls, sizes, options, params):
     mode = options['mode']
     debug = options['debug']
     diffs = options['diffs']
+    csv = options['csv']
 
     if cuda: tpb = params['tpb']
     xmin = params['xmin']
@@ -211,7 +212,8 @@ def execute(calls, sizes, options, params):
     ymax = params['ymax']
     maxiter = params['maxiter']
 
-    objectives = utils.print_header(calls, sizes, options, params)
+    objectives = output.print_header(calls, sizes, options, params) if not csv else []
+    prev = {}
 
     if options['cuda']:  # heat up cache
         for i in range(0, 3):
@@ -243,9 +245,21 @@ def execute(calls, sizes, options, params):
             locals()[name] = np.zeros(yres * xres).astype(np.double)  # reservar memoria
 
             results = {
-                'Function': function,
-                'Size': size
+                'Function': output.alias(function),
+                'Size': size,
+                'Time': '...',
+                'Error': '...'
             }
+
+            if not onlytimes and not csv:
+                results['Average Function'] = output.alias(averageFunc)
+                results['Average'] = '...'
+                if times: results['Average Time'] = '...'
+                if binarizar:
+                    results['Binary Function'] = output.alias(binaryFunc)
+                    results['Binary Time'] = '...'
+                if times: results['Total Time'] = '...'
+                output.print_execution(objectives, results, options, prev, True)
 
             # ejecutar función
             calcTime = time.time()
@@ -254,13 +268,13 @@ def execute(calls, sizes, options, params):
             calcTime = time.time() - calcTime
             results['Time'] = calcTime
 
-            # calcular promedio y error
-            try: error = "-" if original == name else LA.norm(locals()[name] - locals()[original])  # calcular error
+            # calcular error
+            try: error = "-" if original == name else '{:.2f}%'.format(sum(abs(locals()[name] - locals()[original])) / (xres * yres))  # calcular error
             except Exception: error = "NaN"
             results['Error'] = error
 
-            if not onlytimes:
-                results['Average Function'] = averageFunc
+            if not onlytimes:  # calcular promedio
+                results['Average Function'] = output.alias(averageFunc)
                 averageTime = time.time()
                 if checkCuda: average = globals()[averageFunc](xres, yres, locals()[name], tpb)
                 else: average = globals()[averageFunc](xres, yres, locals()[name])  # calcular promedio
@@ -293,7 +307,12 @@ def execute(calls, sizes, options, params):
                 # guardar binarizado
                 if debug: mandel.grabar(globals()[binName], xres, yres, f"{binName}_{size}.bmp")
 
-            utils.print_execution(objectives, results, options['csv'])
+            if times and not onlytimes:
+                total = calcTime + averageTime
+                if binarizar: total += binarizaTime
+                results['Total Time'] = total
+
+            prev = output.print_execution(objectives, results, options, prev, False)
 
 
 if __name__ == '__main__':
