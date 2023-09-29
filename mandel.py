@@ -2,9 +2,13 @@ import numpy as np
 from PIL import Image
 
 
+class MandelException(Exception):
+    pass
+
+
 # Función de cálculo del fractal en Python
 def mandelPy(xmin, ymin, xmax, ymax, maxiter, xres, yres, A):
-    if xres > 2048 or yres > 2048: raise Exception("Tamaño de imagen demasiado grande")
+    if xres > 2048 or yres > 2048: raise MandelException("Tamaño de imagen demasiado grande")
 
     dx = (xmax - xmin) / xres
     dy = (ymax - ymin) / yres
@@ -32,10 +36,10 @@ def binarizaPy(xres, yres, A, average):
 
 # otras funciones auxiliares
 def diffImage(vect1, vect2):
-    vectResult = np.zeros(vect1.shape)
+    vect_result = np.zeros(vect1.shape)
     for i in range(len(vect1)):
-        vectResult[i] = 255 if vect1[i] != vect2[i] else 0
-    return vectResult
+        vect_result[i] = 255 if vect1[i] != vect2[i] else 0
+    return vect_result
 
 
 def grabar(vect, xres, yres, output):

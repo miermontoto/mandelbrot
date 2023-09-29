@@ -1,4 +1,3 @@
-import os
 import sys
 
 
@@ -19,8 +18,8 @@ def print_header(calls, sizes, options, params):
         if options['cuda']:
             print(f"\u001b[32;1mGPU/CUDA mode:\u001b[0m {params['tpb']} threads per block", flush=True)
         else:
-            mode = "SEQUENTIAL" if os.environ.get('OMP_NUM_THREADS') == 1 else "PARALLEL"
-            print(f"\u001b[36;1mCPU mode: \u001b[0m{mode} ({os.cpu_count()} cores)", flush=True)
+            mode = "SEQUENTIAL" if options['threads'] == 1 else "PARALLEL"
+            print(f"\u001b[36;1mCPU mode: \u001b[0m{mode} ({options['threads']} core{'s' if options['threads'] != 1 else ''})", flush=True)
 
     objectives = {
         'Function': max(max(map(lambda x: len(alias(x['name'])), calls)), 8)
@@ -38,9 +37,10 @@ def print_header(calls, sizes, options, params):
             objectives['Average Function'] = 16
             objectives['Average'] = 18
             if options['times']:
-                objectives['Average Time'] = 11
+                objectives['Average Time'] = 12
             if options['binarizar']:
-                objectives['Binary Error'] = 7
+                objectives['Binary Function'] = 15
+                objectives['Binary Error'] = 12
                 if options['times']:
                     objectives['Binary Time'] = 11
             if options['times']:
@@ -55,9 +55,10 @@ def print_header(calls, sizes, options, params):
 
 
 def print_execution(objectives, results, options, prev, flush):
-    if options['csv']:
+    if options['csv']:  # Si se quiere formato CSV, ignorar lo demás
         print(';'.join(map(str, results.values())), flush=True)
         return
+
     if options['onlytimes']:
         if results['Function'] not in prev:
             prev[results['Function']] = f"{results['Function']:{objectives['Function']}}"
@@ -66,13 +67,14 @@ def print_execution(objectives, results, options, prev, flush):
         if list(objectives)[-1] == str(results['Size']):
             print(f"{prev[results['Function']]}", flush=True)
         return prev
+
     for key, value in results.items():
         try: output = f"{value:1.5E}" if "Time" in key else value
         except ValueError: output = value
-        try:
-            if "Error" in key and float(value[:-1]) > 0:
+        try:  # Try to print errors in red
+            if "Error" in key and float(str(value)[:-1]) > 0:
                 color = "\u001b[31;1m" if float(value[:-1]) > 5 else "\u001b[33;1m"
                 output = f"{color}{output}\u001b[0m  "
         except ValueError: pass
-        print(f"{str(output):{objectives[key]}}", end=' ', flush=True)
+        print(f"{str(output):{objectives[key]}}", end=' ', flush=True)  # Print results adjusting spaces
     print("", end="\r" if flush else "\n")

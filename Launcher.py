@@ -30,6 +30,9 @@ def read_options(argv):
         'maxiter': int(argv[4])
     }
 
+    if os.environ.get('OMP_NUM_THREADS') is not None: options['threads'] = int(os.environ.get('OMP_NUM_THREADS'))
+    else: options['threads'] = os.cpu_count()
+
     if options['cuda']:  # Detección de modo CUDA
         try: tpb = int(argv[argv.index("tpb") + 1])
         except Exception:
@@ -43,7 +46,7 @@ def read_options(argv):
 
 
 def read_calls(argv, mode):
-    validFunctions = {   # Diccionario de funciones válidas y sus alias en parámetros.
+    valid_functions = {   # Diccionario de funciones válidas y sus alias en parámetros.
         'omp': {
             'mandel': {
                 'normal': 'mandel_normal',
@@ -80,7 +83,7 @@ def read_calls(argv, mode):
         }
     }
 
-    validCalls = {
+    valid_calls = {
         'prof': {
             'function': 'mandelProf',
             'name': 'fractalProf',
@@ -99,24 +102,24 @@ def read_calls(argv, mode):
     calls = []
     sizes = []
 
-    for key in list(validCalls.keys()):
+    for key in list(valid_calls.keys()):
         if key in argv:
             if key == 'own':
-                averages = [next(iter(validFunctions[mode]['promedio'].values()))]
+                averages = [next(iter(valid_functions[mode]['promedio'].values()))]
 
                 if "averages" in sys.argv:
                     if "all" == sys.argv[sys.argv.index("averages") + 1]:
-                        averages = list(validFunctions[mode]['promedio'].values())
+                        averages = list(valid_functions[mode]['promedio'].values())
                     else:
                         averages = []
                         for i in range(sys.argv.index("averages") + 1, len(sys.argv)):
-                            if sys.argv[i] in validFunctions[mode]['promedio']:
-                                averages.append(validFunctions[mode]['promedio'][sys.argv[i]])
+                            if sys.argv[i] in valid_functions[mode]['promedio']:
+                                averages.append(valid_functions[mode]['promedio'][sys.argv[i]])
                             else: break
 
                 if "methods" in sys.argv:
                     if "all" == sys.argv[sys.argv.index("methods") + 1]:
-                        for key, value in validFunctions[mode]['mandel'].items():
+                        for key, value in valid_functions[mode]['mandel'].items():
                             for average in averages:
                                 calls.append({
                                     'function': value,
@@ -126,10 +129,10 @@ def read_calls(argv, mode):
                                 })
                     else:
                         for i in range(sys.argv.index("methods") + 1, len(sys.argv)):
-                            if sys.argv[i] in validFunctions[mode]['mandel']:
+                            if sys.argv[i] in valid_functions[mode]['mandel']:
                                 for average in averages:
                                     calls.append({
-                                        'function': validFunctions[mode]['mandel'][sys.argv[i]],
+                                        'function': valid_functions[mode]['mandel'][sys.argv[i]],
                                         'name': f'fractalAlumnx{sys.argv[i].capitalize()}',
                                         'average': average,
                                         'binary': 'binarizaAlumnx'
@@ -138,14 +141,14 @@ def read_calls(argv, mode):
                 else:
                     for average in averages:
                         calls.append({
-                            'function': next(iter(validFunctions[mode]['mandel'].values())),
+                            'function': next(iter(valid_functions[mode]['mandel'].values())),
                             'name': 'fractalAlumnx',
                             'average': average,
                             'binary': 'binarizaAlumnx'
                         })
-            else: calls.append(validCalls.get(key))
-        elif f"-{key}" in sys.argv and key in validCalls:
-            calls.remove(validCalls.get(key))
+            else: calls.append(valid_calls.get(key))
+        elif f"-{key}" in sys.argv and key in valid_calls:
+            calls.remove(valid_calls.get(key))
 
     if "sizes" in sys.argv:
         for i in range(sys.argv.index("sizes") + 1, len(sys.argv)):
@@ -230,11 +233,11 @@ def execute(calls, sizes, options, params):
         for call in calls:
             function = call['function']
             name = call['name']
-            averageFunc = call['average']
-            binaryFunc = call['binary']
+            average_function = call['average']
+            binary_function = call['binary']
             original = calls[0]['name']
 
-            checkCuda = cuda and "Py" not in function
+            check_cuda = cuda and "Py" not in function
 
             # Como indicado en clase, tamaños superiores a 2048 suponen un calculo
             # demasiado largo y no son útiles para la práctica.
@@ -252,21 +255,22 @@ def execute(calls, sizes, options, params):
             }
 
             if not onlytimes and not csv:
-                results['Average Function'] = output.alias(averageFunc)
+                results['Average Function'] = output.alias(average_function)
                 results['Average'] = '...'
                 if times: results['Average Time'] = '...'
                 if binarizar:
-                    results['Binary Function'] = output.alias(binaryFunc)
-                    results['Binary Time'] = '...'
+                    results['Binary Function'] = output.alias(binary_function)
+                    results['Binary Error'] = '...'
+                    if times: results['Binary Time'] = '...'
                 if times: results['Total Time'] = '...'
                 output.print_execution(objectives, results, options, prev, True)
 
             # ejecutar función
-            calcTime = time.time()
-            if checkCuda: globals()[function](xmin, ymin, xmax, ymax, maxiter, xres, yres, locals()[name], tpb)
+            calc_time = time.time()
+            if check_cuda: globals()[function](xmin, ymin, xmax, ymax, maxiter, xres, yres, locals()[name], tpb)
             else: globals()[function](xmin, ymin, xmax, ymax, maxiter, xres, yres, locals()[name])
-            calcTime = time.time() - calcTime
-            results['Time'] = calcTime
+            calc_time = time.time() - calc_time
+            results['Time'] = calc_time
 
             # calcular error
             try: error = "-" if original == name else '{:.2f}%'.format(sum(abs(locals()[name] - locals()[original])) / (xres * yres))  # calcular error
@@ -274,13 +278,13 @@ def execute(calls, sizes, options, params):
             results['Error'] = error
 
             if not onlytimes:  # calcular promedio
-                results['Average Function'] = output.alias(averageFunc)
-                averageTime = time.time()
-                if checkCuda: average = globals()[averageFunc](xres, yres, locals()[name], tpb)
-                else: average = globals()[averageFunc](xres, yres, locals()[name])  # calcular promedio
-                averageTime = time.time() - averageTime
+                results['Average Function'] = output.alias(average_function)
+                average_time = time.time()
+                if check_cuda: average = globals()[average_function](xres, yres, locals()[name], tpb)
+                else: average = globals()[average_function](xres, yres, locals()[name])  # calcular promedio
+                average_time = time.time() - average_time
                 results['Average'] = average
-                if times: results['Average Time'] = averageTime
+                if times: results['Average Time'] = average_time
 
             # guardar imágenes
             if debug:
@@ -289,35 +293,35 @@ def execute(calls, sizes, options, params):
 
             # binarizar
             if binarizar and not onlytimes:
-                binName = f"bin_{name}"
-                binOriginal = f"bin_{original}"
-                globals()[binName] = np.copy(locals()[name])  # copiar imagen para evitar sobreescribirla
+                binary_name = f"bin_{name}"
+                binary_original = f"bin_{original}"
+                globals()[binary_name] = np.copy(locals()[name])  # copiar imagen para evitar sobreescribirla
 
                 # calcular binarización
-                binarizaTime = time.time()
-                if checkCuda: globals()[binaryFunc](xres, yres, globals()[binName], average, tpb)
-                else: globals()[binaryFunc](yres, xres, globals()[binName], average)
-                binarizaTime = time.time() - binarizaTime
+                binary_time = time.time()
+                if check_cuda: globals()[binary_function](xres, yres, globals()[binary_name], average, tpb)
+                else: globals()[binary_function](yres, xres, globals()[binary_name], average)
+                binary_time = time.time() - binary_time
 
                 # calcular e imprimir error
-                error = "-" if binName == binOriginal else LA.norm(globals()[binName] - globals()[binOriginal])
+                error = "-" if binary_name == binary_original else LA.norm(globals()[binary_name] - globals()[binary_original])
                 results['Binary Error'] = error
-                if times: results['Binary Time'] = binarizaTime
+                if times: results['Binary Time'] = binary_time
 
                 # guardar binarizado
-                if debug: mandel.grabar(globals()[binName], xres, yres, f"{binName}_{size}.bmp")
+                if debug: mandel.grabar(globals()[binary_name], xres, yres, f"{binary_name}_{size}.bmp")
 
             if times and not onlytimes:
-                total = calcTime + averageTime
-                if binarizar: total += binarizaTime
+                total = calc_time + average_time
+                if binarizar: total += binary_time
                 results['Total Time'] = total
 
             prev = output.print_execution(objectives, results, options, prev, False)
 
 
 if __name__ == '__main__':
-    options, params = read_options(sys.argv)
-    os.system(f"make {options['mode']} >/dev/null")  # Se ignoran los mensajes pero no los errores
-    calls, sizes = read_calls(sys.argv, options['mode'])
-    load_libraries(calls, options['cuda'])
-    execute(calls, sizes, options, params)
+    options, params = read_options(sys.argv)   # Leer parámetros de entrada
+    os.system(f"make {options['mode']} >/dev/null")  # Compilar librerías necesarias
+    calls, sizes = read_calls(sys.argv, options['mode'])  # Leer funciones y tamaños a ejecutar
+    load_libraries(calls, options['cuda'])  # Cargar librerías mediante ctypes
+    execute(calls, sizes, options, params)  # Ejecutar funciones y mostrar resultados
